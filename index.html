@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fantasy Trader</title>
+<meta name="description" content="Build a real fantasy roster, propose a trade, and get a starting-lineup-based grade for both sides. Rest-of-season player values, updated weekly.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=JetBrains+Mono:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* Same design tokens as app/draft_board.html, so this reads as the same tool family. */
+  :root{
+    --bg: #10201A;
+    --panel: #17281F;
+    --panel-raised: #1D3327;
+    --line: rgba(245,243,234,0.10);
+    --line-strong: rgba(245,243,234,0.22);
+    --chalk: #F5F3EA;
+    --chalk-dim: #B9C4B9;
+    --chalk-faint: #7C897E;
+    --yard: #4C9A63;
+    --qb: #D9822B;
+    --qb-bg: #3A2A16;
+    --rb: #4E8FD1;
+    --rb-bg: #14263B;
+    --wr: #4FAE6E;
+    --wr-bg: #123322;
+    --te: #A582D6;
+    --te-bg: #241A3B;
+    --bad: #D9756A;
+    --bad-bg: #3B1F1B;
+  }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0;
+    background: var(--bg);
+    background-image:
+      repeating-linear-gradient(0deg, rgba(245,243,234,0.025) 0px, rgba(245,243,234,0.025) 1px, transparent 1px, transparent 64px);
+    color: var(--chalk);
+    font-family: 'Inter', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap{ max-width: 920px; margin: 0 auto; padding: 28px 18px 60px; }
+
+  .version-badge{
+    position:fixed; top:10px; right:12px; z-index:50;
+    background: var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:8px;
+    padding:4px 9px; font-family:'JetBrains Mono', monospace; font-size:11px; font-weight:600;
+    color: var(--chalk-faint); letter-spacing:0.5px;
+  }
+
+  .masthead{ margin-bottom:18px; }
+  .masthead h1{
+    font-family:'Oswald', sans-serif; font-weight:600; font-size:26px; letter-spacing:0.5px;
+    text-transform: uppercase; margin:0 0 4px;
+  }
+  .masthead p{ margin:0; color: var(--chalk-dim); font-size:13px; }
+  .eyebrow{ font-family:'JetBrains Mono', monospace; font-size:11px; color: var(--yard); letter-spacing:1.5px; text-transform:uppercase; margin-bottom:6px; }
+
+  .reset-btn{
+    background: var(--panel); border:0.5px solid var(--line-strong); border-radius:10px;
+    color: var(--chalk); padding:11px 16px; font-size:13px; font-weight:500; cursor:pointer;
+    font-family:'Inter', sans-serif; white-space:nowrap;
+  }
+  .reset-btn:hover{ background: var(--panel-raised); border-color: var(--chalk-faint); }
+  .reset-btn:active{ transform: scale(0.98); }
+  .reset-btn.small{ padding:6px 11px; font-size:12px; }
+  .reset-btn.primary{ border-color: var(--yard); color: var(--yard); }
+
+  select{
+    background: var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:10px;
+    color: var(--chalk); padding:9px 12px; font-size:13px; font-family:'Inter', sans-serif; cursor:pointer;
+  }
+  select:focus{ outline:none; border-color: var(--yard); }
+
+  /* ---- League bar + new-league form ---- */
+  .league-bar{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:10px; }
+  .league-bar select{ flex:1; min-width:160px; }
+  .storage-warn{ font-size:11px; color: var(--bad); width:100%; }
+  .new-league-form{
+    display:flex; gap:8px; flex-wrap:wrap; align-items:center; background: var(--panel);
+    border:0.5px solid var(--line-strong); border-radius:10px; padding:10px; margin-bottom:14px;
+  }
+  .new-league-form input[type=text]{
+    flex:1; min-width:140px; background: var(--panel-raised); border:0.5px solid var(--line-strong);
+    border-radius:8px; padding:9px 11px; color: var(--chalk); font-size:13px; font-family:'Inter', sans-serif;
+  }
+  .new-league-form input[type=text]:focus{ outline:none; border-color: var(--yard); }
+
+  .league-hint{ font-size:11.5px; color: var(--chalk-faint); margin-bottom:16px; line-height:1.5; }
+
+  .team-select-row{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
+  .team-select-row label{ flex:1; min-width:150px; display:flex; flex-direction:column; gap:4px; font-size:11px; color: var(--chalk-faint); text-transform:uppercase; letter-spacing:0.5px; }
+  .team-select-row select{ width:100%; }
+
+  .teams-grid{ display:flex; flex-direction:column; gap:16px; margin-bottom:20px; }
+  @media (min-width: 760px){
+    .teams-grid{ flex-direction:row; align-items:flex-start; }
+    .team-panel{ flex:1; min-width:0; }
+  }
+
+  .team-panel{
+    background: var(--panel); border:0.5px solid var(--line-strong); border-radius:14px;
+    padding:16px;
+  }
+  .team-head{ display:flex; align-items:center; gap:10px; margin-bottom:12px; flex-wrap:wrap; }
+  .team-name-input{
+    flex:1; min-width:0; background: transparent; border:none; border-bottom:1px solid var(--line-strong);
+    color: var(--chalk); font-family:'Oswald', sans-serif; font-weight:600; font-size:18px;
+    text-transform:uppercase; letter-spacing:0.4px; padding:4px 2px;
+  }
+  .team-name-input:focus{ outline:none; border-color: var(--yard); }
+  .lineup-par{
+    font-family:'JetBrains Mono', monospace; font-size:13px; color: var(--chalk-dim);
+    background: var(--panel-raised); border-radius:8px; padding:5px 10px; white-space:nowrap;
+  }
+  .lineup-par b{ color: var(--chalk); }
+
+  .search-box{ position:relative; margin-bottom:10px; }
+  .search-box input{
+    width:100%; background: var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:10px;
+    padding:10px 12px 10px 36px; color: var(--chalk); font-size:14px; font-family:'Inter', sans-serif;
+  }
+  .search-box input:focus{ outline:none; border-color: var(--yard); box-shadow: 0 0 0 3px rgba(76,154,99,0.18); }
+  .search-box input::placeholder{ color: var(--chalk-faint); }
+  .search-icon{ position:absolute; left:11px; top:50%; transform:translateY(-50%); color: var(--chalk-faint); font-size:14px; pointer-events:none; }
+  .search-results{
+    position:absolute; left:0; right:0; top:calc(100% + 4px); z-index:20;
+    background: var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:10px;
+    max-height:260px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,0.35);
+  }
+  .search-result{
+    display:flex; align-items:center; gap:8px; padding:8px 10px; cursor:pointer;
+    border-bottom:0.5px solid var(--line);
+  }
+  .search-result:last-child{ border-bottom:none; }
+  .search-result:hover{ background: rgba(245,243,234,0.06); }
+  .search-empty{ padding:10px; color: var(--chalk-faint); font-size:12px; }
+
+  .posrank{
+    font-family:'JetBrains Mono', monospace; font-size:10px; font-weight:600; min-width:38px; text-align:center;
+    padding:3px 0; border-radius:6px; flex-shrink:0;
+  }
+  .posrank.QB{ color: var(--qb); background: var(--qb-bg); }
+  .posrank.RB{ color: var(--rb); background: var(--rb-bg); }
+  .posrank.WR{ color: var(--wr); background: var(--wr-bg); }
+  .posrank.TE{ color: var(--te); background: var(--te-bg); }
+  .posrank.unk{ color: var(--chalk-faint); background: rgba(245,243,234,0.06); }
+
+  .roster-list{ display:flex; flex-direction:column; gap:5px; }
+  .roster-row{
+    display:flex; align-items:center; gap:9px; background: var(--panel-raised);
+    border:0.5px solid var(--line); border-radius:9px; padding:8px 9px;
+  }
+  .roster-row.marked{ border-color: var(--yard); background: rgba(76,154,99,0.10); }
+  .roster-meta{ flex:1; min-width:0; }
+  .roster-name{ font-size:13.5px; font-weight:500; color: var(--chalk); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .roster-team{ font-size:11px; color: var(--chalk-faint); margin-top:1px; }
+  .roster-nums{ text-align:right; flex-shrink:0; min-width:44px; }
+  .roster-par{ font-family:'JetBrains Mono', monospace; font-size:13px; font-weight:600; color: var(--chalk); }
+  .roster-parlabel{ font-size:9px; color: var(--chalk-faint); }
+  .send-toggle{
+    flex-shrink:0; width:30px; height:30px; border-radius:8px; border:0.5px solid var(--line-strong);
+    background:transparent; color: var(--chalk-faint); cursor:pointer; font-size:14px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .send-toggle.on{ background: var(--yard); border-color: var(--yard); color: var(--bg); }
+  .remove-btn{
+    flex-shrink:0; width:22px; height:22px; border-radius:6px; border:none; background:transparent;
+    color: var(--chalk-faint); cursor:pointer; font-size:14px; line-height:1;
+  }
+  .remove-btn:hover{ color: var(--bad); }
+  .roster-empty{ text-align:center; padding:18px 10px; color: var(--chalk-faint); font-size:12px; }
+
+  .summary-panel{
+    background: var(--panel); border:0.5px solid var(--line-strong); border-radius:14px; padding:18px;
+    margin-bottom:20px;
+  }
+  .summary-title{
+    font-family:'Oswald', sans-serif; font-weight:600; font-size:16px; text-transform:uppercase;
+    letter-spacing:0.5px; margin:0 0 14px;
+  }
+  .summary-empty{ text-align:center; padding:30px 10px; color: var(--chalk-faint); font-size:13px; }
+  .summary-empty .big{ font-family:'Oswald', sans-serif; font-size:16px; color: var(--chalk-dim); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+
+  .grade-grid{ display:flex; flex-direction:column; gap:14px; }
+  @media (min-width: 760px){ .grade-grid{ flex-direction:row; } }
+  .grade-card{
+    flex:1; background: var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:12px;
+    padding:14px; display:flex; gap:14px; align-items:flex-start;
+  }
+  .grade-badge{
+    flex-shrink:0; width:56px; height:56px; border-radius:12px; display:flex; align-items:center;
+    justify-content:center; font-family:'Oswald', sans-serif; font-weight:600; font-size:22px;
+  }
+  .grade-badge.small{ width:38px; height:38px; font-size:15px; border-radius:9px; }
+  .grade-badge.g-a{ background: var(--wr-bg); color: var(--wr); }
+  .grade-badge.g-b{ background: var(--rb-bg); color: var(--rb); }
+  .grade-badge.g-c{ background: var(--qb-bg); color: var(--qb); }
+  .grade-badge.g-d, .grade-badge.g-f{ background: var(--bad-bg); color: var(--bad); }
+
+  .grade-body{ flex:1; min-width:0; }
+  .grade-team{ font-family:'Oswald', sans-serif; font-weight:600; font-size:14px; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px; }
+  .grade-line{ font-size:12px; color: var(--chalk-dim); margin-bottom:3px; }
+  .grade-line b{ color: var(--chalk); font-family:'JetBrains Mono', monospace; }
+  .grade-players{ font-size:11.5px; color: var(--chalk-faint); margin-top:8px; line-height:1.5; }
+  .grade-players b{ color: var(--chalk-dim); }
+  .apply-row{ margin-top:14px; text-align:right; }
+
+  .methodology{
+    margin-top:16px; font-size:11px; color: var(--chalk-faint); line-height:1.6;
+    border-top:0.5px solid var(--line); padding-top:12px;
+  }
+  .methodology b{ color: var(--chalk-dim); }
+  .methodology p{ margin:0 0 8px; }
+  .methodology p:last-child{ margin-bottom:0; }
+
+  /* ---- Recommendations ---- */
+  .rec-panel{
+    background: var(--panel); border:0.5px solid var(--line-strong); border-radius:14px; padding:18px;
+    margin-bottom:20px;
+  }
+  .rec-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+  .rec-hint{ font-size:11.5px; color: var(--chalk-faint); margin-bottom:12px; line-height:1.5; }
+  .rec-card{
+    display:flex; align-items:center; gap:12px; background: var(--panel-raised);
+    border:0.5px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; flex-wrap:wrap;
+  }
+  .rec-card-head{ display:flex; align-items:center; gap:10px; flex:1; min-width:220px; }
+  .rec-opp{ font-family:'Oswald', sans-serif; font-weight:600; font-size:13px; text-transform:uppercase; letter-spacing:0.3px; margin-bottom:2px; }
+  .rec-lines{ font-size:11.5px; color: var(--chalk-dim); line-height:1.5; }
+  .rec-lines b{ color: var(--chalk); font-family:'JetBrains Mono', monospace; }
+
+  @media (max-width: 420px){
+    .masthead h1{ font-size:21px; }
+    .grade-badge{ width:46px; height:46px; font-size:18px; }
+
+    /* Same fix the Draft Board already applies at this width (HANDOFF.md sec 7): a roster row
+       has too many fixed-width columns (rank badge, PAR, two buttons) to also ellipsis a full
+       name down to a few characters and still be readable -- shrink the fixed columns and let
+       the name wrap to a second line instead of truncating. */
+    .team-panel{ padding:12px; }
+    .roster-row{ gap:6px; padding:7px 8px; }
+    .roster-name{ white-space:normal; overflow:visible; text-overflow:clip; line-height:1.25; }
+    .posrank{ min-width:30px; font-size:9px; }
+    .roster-nums{ min-width:38px; }
+    .roster-par{ font-size:12px; }
+    .send-toggle{ width:26px; height:26px; }
+    .remove-btn{ width:18px; height:18px; }
+  }
+</style>
+</head>
+<body>
+<div class="version-badge">RoS v2</div>
+<div class="wrap">
+
+  <div class="masthead">
+    <div class="eyebrow">2026 &middot; Rest-of-season value &middot; regenerate weekly</div>
+    <h1>Fantasy Trader</h1>
+    <p id="subtitle">Add each team's full roster, mark who's changing hands, and get a trade grade for each side.</p>
+  </div>
+
+  <div id="leagueBar"></div>
+
+  <div id="teamSelectors"></div>
+
+  <div class="teams-grid">
+    <div class="team-panel" id="panelA"></div>
+    <div class="team-panel" id="panelB"></div>
+  </div>
+
+  <div class="summary-panel">
+    <div class="summary-title">Trade grade</div>
+    <div id="summaryOut"></div>
+    <div class="methodology" id="methodology"></div>
+  </div>
+
+  <div id="recPanel"></div>
+
+</div>
+
+<script>
+// ROS_PLAYERS: [name, pos, team, ros_proj, ros_par, games_played, games_remaining]
+// Injected from ../data/ros_values_current.json by sim/inject_trade_analyzer.py -- see that
+// script and the Trade Analyzer section of HANDOFF.md for how/when to regenerate this.
+const ROS_PLAYERS = [["Jahmyr Gibbs","RB","DET",366,217,0,17],["Ja'Marr Chase","WR","CIN",380,207,0,17],["Bijan Robinson","RB","ATL",352,203,0,17],["Saquon Barkley","RB","PHI",318,169,0,17],["Christian McCaffrey","RB","SF",311,162,1,16],["Amon-Ra St. Brown","WR","DET",327,154,0,17],["Derrick Henry","RB","BAL",302,153,0,17],["De'Von Achane","RB","MIA",299,150,0,17],["Justin Jefferson","WR","MIN",319,146,0,17],["Jaxon Smith-Njigba","WR","SEA",314,141,1,16],["James Cook III","RB","BUF",282,133,0,17],["Jonathan Taylor","RB","IND",281,132,0,17],["Chase Brown","RB","CIN",273,124,0,17],["Drake London","WR","ATL",291,118,0,17],["CeeDee Lamb","WR","DAL",288,115,0,17],["Brock Bowers","TE","LV",263,113,0,17],["Trey McBride","TE","ARI",257,107,0,17],["Chris Olave","WR","NO",277,104,0,17],["Omarion Hampton","RB","LAC",244,95,0,17],["Colston Loveland","TE","CHI",240,90,0,17],["Rashee Rice","WR","KC",262,89,0,17],["Kyren Williams","RB","LA",236,87,1,16],["Lamar Jackson","QB","BAL",417,86,0,17],["Malik Nabers","WR","NYG",258,85,0,17],["Ashton Jeanty","RB","LV",227,78,0,17],["Tyler Warren","TE","IND",221,71,0,17],["Garrett Wilson","WR","NYJ",242,69,0,17],["Josh Allen","QB","BUF",389,68,0,17],["Nico Collins","WR","HOU",240,67,0,17],["Bucky Irving","RB","TB",215,66,0,17],["Puka Nacua","WR","LA",237,64,1,16],["Harold Fannin Jr.","TE","CLE",214,64,0,17],["Breece Hall","RB","NYJ",213,64,0,17],["Kenneth Walker III","RB","KC",212,63,0,17],["Joe Burrow","QB","CIN",378,61,0,17],["Terry McLaurin","WR","WAS",232,59,0,17],["Ladd McConkey","WR","LAC",226,53,0,17],["D'Andre Swift","RB","CHI",202,53,0,17],["Zay Flowers","WR","BAL",224,51,0,17],["David Montgomery","RB","HOU",196,47,0,17],["Jayden Daniels","QB","WAS",356,46,0,17],["DeVonta Smith","WR","PHI",219,46,0,17],["Brian Thomas Jr.","WR","JAX",217,44,0,17],["Tetairoa McMillan","WR","CAR",216,43,0,17],["Tee Higgins","WR","CIN",215,42,0,17],["DJ Moore","WR","BUF",211,38,0,17],["Dak Prescott","QB","DAL",342,37,0,17],["George Pickens","WR","DAL",210,37,0,17],["Demarcus Robinson","WR","SF",208,35,1,16],["George Kittle","TE","SF",183,33,1,16],["Aaron Jones Sr.","RB","MIN",182,33,0,17],["Travis Kelce","TE","KC",181,31,0,17],["Cam Skattebo","RB","NYG",178,29,0,17],["Jalen Hurts","QB","PHI",328,28,0,17],["Jeremiyah Love","RB","ARI",177,28,0,17],["A.J. Brown","WR","NE",200,27,1,16],["Javonte Williams","RB","DAL",176,27,0,17],["Mike Evans","WR","SF",200,27,1,16],["Baker Mayfield","QB","TB",323,25,0,17],["Kenneth Walker","WR","KC",197,24,0,17],["Courtland Sutton","WR","DEN",197,24,0,17],["Tony Pollard","RB","TEN",172,23,0,17],["Jameson Williams","WR","DET",195,22,0,17],["Rhamondre Stevenson","RB","NE",171,22,1,16],["Emeka Egbuka","WR","TB",193,20,0,17],["Rico Dowdle","RB","PIT",169,20,0,17],["Tucker Kraft","TE","GB",168,18,0,17],["Quinshon Judkins","RB","CLE",167,18,0,17],["Mark Andrews","TE","BAL",167,17,0,17],["Jared Goff","QB","DET",309,16,0,17],["Josh Jacobs","RB","GB",163,14,0,17],["Bo Nix","QB","DEN",305,13,0,17],["Patrick Mahomes","QB","KC",301,10,0,17],["J.K. Dobbins","RB","DEN",157,8,0,17],["Travis Etienne Jr.","RB","NO",156,7,0,17],["Justin Herbert","QB","LAC",294,6,0,17],["Chuba Hubbard","RB","CAR",154,5,0,17],["Davante Adams","WR","LA",177,4,1,16],["Jaylen Waddle","WR","DEN",176,3,0,17],["Kyle Pitts Sr.","TE","ATL",153,3,0,17],["Rachaad White","RB","WAS",152,3,0,17],["Marvin Harrison Jr.","WR","ARI",173,0,0,17],["Brock Purdy","QB","SF",285,0,1,16],["Najee Harris","RB","NYG",149,0,0,17],["Sam LaPorta","TE","DET",150,0,0,17],["Jakobi Meyers","WR","JAX",172,-1,0,17],["Jerry Jeudy","WR","CLE",171,-2,0,17],["DK Metcalf","WR","PIT",170,-3,0,17],["Caleb Williams","QB","CHI",281,-3,0,17],["Bhayshul Tuten","RB","JAX",146,-3,0,17],["Kyler Murray","QB","MIN",280,-3,0,17],["Luther Burden III","WR","CHI",169,-4,0,17],["Josh Downs","WR","IND",165,-8,0,17],["Jordan Addison","WR","MIN",165,-8,0,17],["Jaxson Dart","QB","NYG",273,-8,0,17],["Deebo Samuel Sr.","WR","SF",164,-9,1,16],["Pat Freiermuth","TE","PIT",140,-10,0,17],["Jayden Reed","WR","GB",161,-12,0,17],["Wan'Dale Robinson","WR","TEN",157,-16,0,17],["Alvin Kamara","RB","NO",133,-16,0,17],["Tyrone Tracy Jr.","RB","NYG",133,-16,0,17],["Jaylen Warren","RB","PIT",131,-18,0,17],["Jauan Jennings","WR","MIN",154,-19,0,17],["Michael Pittman Jr.","WR","PIT",153,-20,0,17],["Jadarian Price","RB","SEA",128,-21,1,16],["Rome Odunze","WR","CHI",152,-21,0,17],["David Njoku","TE","LAC",129,-21,0,17],["Xavier Worthy","WR","KC",147,-26,0,17],["Khalil Shakir","WR","BUF",147,-26,0,17],["Isaiah Likely","TE","NYG",123,-27,0,17],["Mack Hollins","WR","NE",146,-27,1,16],["Calvin Ridley","WR","TEN",144,-29,0,17],["Brian Robinson","RB","ATL",120,-29,0,17],["Juwan Johnson","TE","NO",119,-31,0,17],["Carnell Tate","WR","TEN",141,-32,0,17],["Jordan Love","QB","GB",235,-32,0,17],["Geno Smith","QB","NYJ",234,-33,0,17],["Keenan Allen","WR","IND",139,-34,0,17],["Tyler Shough","QB","NO",233,-34,0,17],["Dallas Goedert","TE","PHI",116,-34,0,17],["Chris Godwin Jr.","WR","TB",138,-35,0,17],["Alec Pierce","WR","IND",138,-35,0,17],["Eli Raridon","TE","NE",115,-35,1,16],["Hunter Henry","TE","NE",114,-36,1,16],["James Conner","RB","ARI",112,-37,0,17],["Dalton Schultz","TE","HOU",113,-37,0,17],["Jake Ferguson","TE","DAL",112,-38,0,17],["Aaron Rodgers","QB","PIT",227,-38,0,17],["Dalton Kincaid","TE","BUF",112,-38,0,17],["RJ Harvey","RB","DEN",111,-38,0,17],["Jonathon Brooks","RB","CAR",111,-38,0,17],["Christian Watson","WR","GB",134,-39,0,17],["Quentin Johnston","WR","LAC",132,-41,0,17],["Drake Maye","QB","NE",220,-42,1,16],["Kenny Gainwell","RB","TB",107,-42,0,17],["Jordan Mason","RB","MIN",107,-42,0,17],["Rashod Bateman","WR","BAL",129,-44,0,17],["C.J. Stroud","QB","HOU",215,-45,0,17],["TreVeyon Henderson","RB","NE",104,-45,0,17],["Zach Charbonnet","RB","SEA",104,-45,0,17],["Michael Wilson","WR","ARI",125,-48,0,17],["Tyjae Spears","RB","TEN",101,-48,0,17],["Malik Willis","QB","MIA",210,-49,0,17],["Parker Washington","WR","JAX",123,-50,0,17],["Justice Hill","RB","BAL",99,-50,0,17],["Trevor Lawrence","QB","JAX",206,-51,0,17],["Drew Lock","QB","SEA",204,-52,1,16],["Stefon Diggs","WR","WAS",120,-53,0,17],["Seattle Defense","WR","SEA",117,-56,0,17],["Ray Davis","RB","BUF",93,-56,0,17],["Sam Darnold","QB","SEA",198,-57,1,16],["Tyler Allgeier","RB","",92,-57,0,17],["Brenton Strange","TE","",93,-57,0,17],["Jacory Croskey-Merritt","RB","",92,-57,0,17],["Tank Bigsby","WR","",113,-60,0,17],["Bryce Young","QB","",193,-60,0,17],["Fernando Mendoza","QB","",193,-60,0,17],["Cooper Kupp","WR","SEA",112,-61,1,16],["Denver Defense","WR","",112,-61,0,17],["Jaleel McLaughlin","RB","",88,-61,0,17],["Demario Douglas","WR","NE",112,-61,1,16],["Matthew Stafford","QB","LA",190,-62,1,16],["MarShawn Lloyd","RB","",87,-62,0,17],["T.J. Hockenson","TE","",88,-62,0,17],["Jalen McMillan","WR","",110,-63,0,17],["Chig Okonkwo","TE","",87,-63,0,17],["Tre Tucker","WR","",109,-64,0,17],["Cam Ward","QB","",186,-64,0,17],["Kenyon Sadiq","TE","",84,-66,0,17],["Tua Tagovailoa","QB","",180,-68,0,17],["Woody Marks","RB","",80,-69,0,17],["KC Concepcion","WR","",103,-70,0,17],["Jacoby Brissett","QB","",177,-70,0,17],["Kayshon Boutte","WR","",101,-72,0,17],["Greg Dulcich","TE","",77,-73,0,17],["Ty Johnson","RB","",76,-73,0,17],["Makai Lemon","WR","",99,-74,0,17],["Braelon Allen","RB","",75,-74,0,17],["Matthew Golden","WR","",98,-75,0,17],["Xavier Legette","WR","",98,-75,0,17],["Houston Defense","WR","",97,-76,0,17],["Samaje Perine","RB","",72,-77,0,17],["Kaelon Black","RB","SF",72,-77,1,16],["Jalen Coker","WR","",95,-78,0,17],["AJ Barner","TE","SEA",71,-79,1,16],["LA Rams Defense","WR","",94,-79,0,17],["Dontayvion Wicks","WR","",94,-79,0,17],["Kyle Monangai","RB","",69,-80,0,17],["Mike Washington Jr.","RB","",69,-80,0,17],["Dylan Sampson","RB","",69,-80,0,17],["De'Zhaun Stribling","WR","",92,-81,0,17],["Daniel Jones","QB","",160,-81,0,17],["Chris Rodriguez Jr.","RB","",68,-81,0,17],["Jonah Coleman","RB","",67,-82,0,17],["Keon Coleman","WR","",90,-83,0,17],["Jalen Nailor","WR","",90,-83,0,17],["Emmett Johnson","RB","",66,-83,0,17],["Darius Slayton","WR","",89,-84,0,17],["Deshaun Watson","QB","",155,-84,0,17],["Devaughn Vele","WR","",88,-85,0,17],["Brady Russell","RB","SEA",64,-85,1,16],["Blake Corum","RB","LA",63,-86,1,16],["Keaton Mitchell","RB","",62,-87,0,17],["Minnesota Defense","WR","",85,-88,0,17],["Luke Farrell","TE","SF",62,-88,1,16],["Nicholas Singleton","RB","",59,-90,0,17],["Romeo Doubs","WR","NE",82,-91,1,16],["Terrance Ferguson","TE","LA",59,-91,1,16],["Jordan James","RB","",58,-91,0,17],["Emari Demercado","RB","",57,-92,0,17],["New England Defense","WR","",80,-93,0,17],["Denzel Boston","WR","",80,-93,0,17],["Brandon Aubrey","WR","",78,-95,0,17],["Malik Davis","RB","",54,-95,0,17],["Ronnie Rivers","RB","LA",54,-95,1,16],["Philadelphia Defense","WR","",77,-96,0,17],["Travis Hunter","WR","",74,-99,0,17],["Detroit Defense","WR","",74,-99,0,17],["Dean Connors","RB","",49,-100,0,17],["Ka'imi Fairbairn","WR","",70,-103,0,17],["Lan Larison","RB","NE",46,-103,1,16],["Rashid Shaheed","WR","SEA",69,-104,1,16],["Jason Myers","WR","",69,-104,0,17],["Pat Bryant","WR","",69,-104,0,17],["Pittsburgh Defense","WR","",69,-104,0,17],["Isiah Pacheco","RB","",45,-104,0,17],["Tre' Harris","WR","",68,-105,0,17],["Omar Cooper Jr.","WR","",68,-105,0,17],["Lewis Bond","WR","",67,-106,0,17],["LA Chargers Defense","WR","",67,-106,0,17],["Kimani Vidal","RB","",43,-106,0,17],["Harrison Mevis","WR","",66,-107,0,17],["Chimere Dike","WR","",66,-107,0,17],["Cameron Dicker","WR","",66,-107,0,17],["Ryan Flournoy","WR","",66,-107,0,17],["Zachariah Branch","WR","",65,-108,0,17],["Jaylin Noel","WR","",65,-108,0,17],["Ja'Kobi Lane","WR","",65,-108,0,17],["Chris Boswell","WR","",65,-108,0,17],["Jake Bates","WR","",65,-108,0,17],["Troy Franklin","WR","",64,-109,0,17],["Chris Bell","WR","",64,-109,0,17],["Malachi Fields","WR","",64,-109,0,17],["Cam Little","WR","",64,-109,0,17],["Jacksonville Defense","WR","",63,-110,0,17],["Isaac TeSlaa","WR","",63,-110,0,17],["Brandon Aiyuk","WR","",63,-110,0,17],["Chase McLaughlin","WR","",62,-111,0,17],["Caleb Douglas","WR","",62,-111,0,17],["Cyrus Allen","WR","",62,-111,0,17],["Germie Bernard","WR","",62,-111,0,17],["Adonai Mitchell","WR","",62,-111,0,17],["Tank Dell","WR","",62,-111,0,17],["Malik Washington","WR","",62,-111,0,17],["Blake Grupe","WR","",62,-111,0,17],["Harrison Butker","WR","",61,-112,0,17],["Green Bay Defense","WR","",60,-113,0,17],["Tyler Loop","WR","",60,-113,0,17],["Will Reichard","WR","",60,-113,0,17],["Davis Allen","TE","LA",37,-113,1,16],["San Francisco Defense","WR","",59,-114,0,17],["Atlanta Defense","WR","",59,-114,0,17],["Tyquan Thornton","WR","",59,-114,0,17],["Eddy Pi\u00f1eiro","WR","",59,-114,0,17],["Buffalo Defense","WR","",58,-115,0,17],["Baltimore Defense","WR","",58,-115,0,17],["Andy Borregales","WR","",58,-115,0,17],["Cleveland Defense","WR","",58,-115,0,17],["Wil Lutz","WR","",58,-115,0,17],["Trey Smack","WR","",57,-116,0,17],["Evan McPherson","WR","",57,-116,0,17],["NY Jets Defense","WR","",57,-116,0,17],["Cairo Santos","WR","",57,-116,0,17],["Odell Beckham Jr.","WR","",57,-116,0,17],["Dallas Defense","WR","",57,-116,0,17],["Zavion Thomas","WR","",56,-117,0,17],["Chicago Defense","WR","",56,-117,0,17],["Tyler Bass","WR","",56,-117,0,17],["NY Giants Defense","WR","",56,-117,0,17],["Jake Elliott","WR","",56,-117,0,17],["Kansas City Defense","WR","",56,-117,0,17],["Tampa Bay Defense","WR","",56,-117,0,17],["Tennessee Defense","WR","",56,-117,0,17],["Washington Defense","WR","",56,-117,0,17],["Bub Means","WR","",56,-117,0,17],["New Orleans Defense","WR","",56,-117,0,17],["Cincinnati Defense","WR","",56,-117,0,17],["Kaden Wetjen","WR","",56,-117,0,17],["George Holani","WR","SEA",55,-118,1,16],["Colby Parkinson","TE","LA",26,-124,1,16],["Tyler Higbee","TE","LA",19,-131,1,16],["Corey Kiner","RB","NE",18,-131,1,16],["Jordyn Tyson","WR","",41,-132,0,17],["Xavier Hutchinson","WR","",38,-135,0,17],["Emanuel Wilson","RB","SEA",5,-144,1,16],["Jordan Whittington","WR","LA",29,-144,1,16],["Eric Saubert","TE","SEA",0,-150,1,16],["Stetson Bennett","QB","LA",23,-170,1,16],["Khadarel Hodge","WR","SF",0,-173,1,16],["Xavier Smith","WR","LA",0,-173,1,16],["Jacob Cowing","WR","SF",0,-173,1,16],["Kyle Williams","WR","NE",0,-173,1,16],["Konata Mumpfield","WR","LA",0,-173,1,16],["Montorie Foster","WR","SEA",0,-173,1,16]];
+const ROS_REFRESH_LABEL = "2026-09-11";
+
+function playersToPool(arr){
+  return arr.map(p => ({ name:p[0], pos:p[1], team:p[2], ros_proj:p[3], ros_par:p[4],
+                          games_played:p[5], games_remaining:p[6] }));
+}
+const POOL = playersToPool(ROS_PLAYERS);
+const POOL_BY_NAME = new Map(POOL.map(p => [p.name, p]));
+
+// Position-rank tags (RB1, WR2...), same convention as the Draft Board: computed once from
+// the whole pool by ros_par, not from whatever's currently shown in a search/roster list.
+const POS_RANK = new Map();
+{
+  const byPos = {};
+  POOL.forEach(p => { (byPos[p.pos] = byPos[p.pos] || []).push(p); });
+  Object.keys(byPos).forEach(pos => {
+    byPos[pos].slice().sort((a,b) => b.ros_par - a.ros_par)
+      .forEach((p,i) => POS_RANK.set(p.name, pos + (i+1)));
+  });
+}
+
+// ---- League roster construction (HANDOFF.md sec 1: 1QB/2RB/2WR/1TE/2FLEX) drives the
+// "optimal starting lineup" calculation both the grade and the recommendation engine fold
+// into -- see the methodology note rendered at the bottom of the page for the full reasoning. ----
+const STARTER_SLOTS = { QB:1, RB:2, WR:2, TE:1 };
+const FLEX_COUNT = 2;
+// A required starting slot with nobody in it is worse than literally any real player at that
+// position (even a deep replacement-level one, whose ros_par floors near/at 0) -- this constant
+// makes an empty required slot score clearly worse than the worst realistic real starter, so the
+// lineup-impact metric doesn't quietly reward leaving a roster slot empty during entry.
+const NO_STARTER_PENALTY = -150;
+
+function optimalLineupPAR(roster){
+  const byPos = { QB:[], RB:[], WR:[], TE:[] };
+  roster.forEach(p => { if (byPos[p.pos]) byPos[p.pos].push(p.ros_par); });
+  Object.values(byPos).forEach(a => a.sort((x,y) => y-x));
+  let total = 0;
+  const leftover = { RB:[], WR:[], TE:[] };
+  ['QB','RB','WR','TE'].forEach(pos => {
+    const need = STARTER_SLOTS[pos];
+    const arr = byPos[pos];
+    for (let i=0; i<need; i++) total += (i < arr.length) ? arr[i] : NO_STARTER_PENALTY;
+    if (pos !== 'QB') leftover[pos] = arr.slice(need);
+  });
+  const flexPool = [...leftover.RB, ...leftover.WR, ...leftover.TE].sort((a,b) => b-a);
+  for (let i=0; i<FLEX_COUNT; i++) total += (i < flexPool.length) ? flexPool[i] : 0;
+  return Math.round(total);
+}
+
+// ---- Trade grade bands, in "optimal-starting-lineup rest-of-season PAR points gained/lost."
+// Calibrated (not backtested -- there's no real "graded trades vs. real outcomes" dataset to
+// validate against, same documented-assumption spirit as blend.py's judgment-source weighting,
+// see HANDOFF.md) against this pool's own PAR spread: top rest-of-season players sit
+// ~150-220 PAR above replacement, so a genuine one-for-one star-level upgrade can easily swing
+// a lineup by double digits -- these bands are sized to that range. ----
+const GRADE_BANDS = [
+  { min: 30,        grade: 'A+', cls: 'g-a' },
+  { min: 18,        grade: 'A',  cls: 'g-a' },
+  { min: 10,        grade: 'A-', cls: 'g-a' },
+  { min: 4,         grade: 'B+', cls: 'g-b' },
+  { min: 1,         grade: 'B',  cls: 'g-b' },
+  { min: -1,        grade: 'B-', cls: 'g-b' },
+  { min: -4,        grade: 'C+', cls: 'g-c' },
+  { min: -10,       grade: 'C',  cls: 'g-c' },
+  { min: -18,       grade: 'C-', cls: 'g-c' },
+  { min: -30,       grade: 'D',  cls: 'g-d' },
+  { min: -Infinity, grade: 'F',  cls: 'g-f' },
+];
+function gradeFor(delta){
+  for (const b of GRADE_BANDS) if (delta >= b.min) return b;
+  return GRADE_BANDS[GRADE_BANDS.length-1];
+}
+
+// =========================================================================================
+// Leagues: persisted, multi-team (10 or 12) rosters you build up once and reuse across many
+// trade evaluations. Saved to localStorage, scoped per browser -- deliberate, not a fallback:
+// this is a public site (fantasytrader.online) with no accounts, so "each visitor only sees
+// their own leagues" is enforced simply by nobody's data ever leaving their own browser. A
+// server-side store shared across visitors was considered and rejected for exactly that reason
+// -- it would need real accounts/auth to keep people's leagues apart, which wasn't wanted for
+// v1. A special, never-saved "scratch" league keeps the original two-panel quick-trade behavior
+// (no setup required, no persistence) alongside real leagues, so the tool still works with zero
+// setup the first time a new visitor opens it.
+// =========================================================================================
+const LS_KEY = 'trade_analyzer_leagues_v1';
+let storageOK = true;
+
+function loadSavedLeagues(){
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch (e){ storageOK = false; return []; }
+}
+function persistLeagues(){
+  if (!storageOK) return;
+  try { localStorage.setItem(LS_KEY, JSON.stringify(leagues.filter(l => l.id !== 'scratch'))); }
+  catch (e){ storageOK = false; }
+}
+
+const SCRATCH_LEAGUE = { id:'scratch', name:'Quick Trade (not saved)', teamCount:2,
+  teams:[{ id:'A', name:'Team A', roster:[] }, { id:'B', name:'Team B', roster:[] }] };
+
+let leagues = [SCRATCH_LEAGUE, ...loadSavedLeagues()];
+let activeLeagueId = 'scratch';
+let teamAId = 'A', teamBId = 'B';
+let searchQuery = { A: '', B: '' };
+let sendAway = { A: new Set(), B: new Set() };
+let newLeagueForm = false;
+let importLeagueForm = false;
+let recommendations = null; // { forTeamId, results: [...] } | null
+
+function activeLeague(){ return leagues.find(l => l.id === activeLeagueId); }
+function teamById(league, id){ return league.teams.find(t => t.id === id); }
+function currentTeam(side){ return teamById(activeLeague(), side === 'A' ? teamAId : teamBId); }
+
+// A saved roster only stores player NAMES (compact, and the source of truth for pos/value stays
+// the injected ROS_PLAYERS pool) -- hydrate() resolves those names against POOL_BY_NAME for
+// rendering/scoring. A name that no longer matches the current pool (e.g. dropped in a refresh,
+// or a typo) still renders instead of silently vanishing -- flagged as "unknown" with 0 PAR
+// rather than crashing or hiding real roster data.
+function hydrate(names){
+  return names.map(n => {
+    const p = POOL_BY_NAME.get(n);
+    return p ? { ...p } : { name:n, pos:'?', team:'', ros_proj:0, ros_par:0, games_played:0, games_remaining:17, unknown:true };
+  });
+}
+
+function createLeague(name, teamCount){
+  const id = 'lg_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  const teams = [];
+  for (let i=1; i<=teamCount; i++) teams.push({ id:'t'+i, name:'Team '+i, roster:[] });
+  const league = { id, name: (name && name.trim()) || ('League ' + (leagues.length)), teamCount, teams };
+  leagues.push(league);
+  persistLeagues();
+  activeLeagueId = id;
+  teamAId = teams[0].id; teamBId = teams[1].id;
+  resetTradeState();
+  newLeagueForm = false;
+}
+// Import a league from an external source (e.g. a real ESPN/Sleeper/Yahoo league) as plain JSON:
+// { "name": "League Name", "teams": [ { "name": "Team Name", "roster": ["Player Name", ...] }, ... ] }
+// Player names should match this pool's naming convention (POOL_BY_NAME) where possible --
+// anything that doesn't match still imports fine, just renders as "unknown"/0 PAR (hydrate()
+// handles that already) rather than being silently dropped. Team/league ids are generated fresh
+// here; teamCount is derived from however many teams are in the array (10 or 12 for this
+// league's format, but the importer itself doesn't enforce that -- same permissiveness as
+// createLeague()).
+function importLeague(data){
+  if (!data || !Array.isArray(data.teams) || !data.teams.length){
+    throw new Error('Expected {name, teams: [{name, roster: [...]}]}');
+  }
+  const id = 'lg_' + Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  const teams = data.teams.map((t, i) => ({
+    id: 't' + (i + 1),
+    name: (t.name && String(t.name).trim()) || ('Team ' + (i + 1)),
+    roster: Array.isArray(t.roster) ? t.roster.filter(n => typeof n === 'string' && n.trim()) : [],
+  }));
+  const league = { id, name: (data.name && data.name.trim()) || 'Imported League', teamCount: teams.length, teams };
+  leagues.push(league);
+  persistLeagues();
+  activeLeagueId = id;
+  teamAId = teams[0].id; teamBId = teams.length > 1 ? teams[1].id : teams[0].id;
+  resetTradeState();
+  newLeagueForm = false;
+  importLeagueForm = false;
+}
+function deleteLeague(id){
+  const league = leagues.find(l => l.id === id);
+  if (!confirm(`Delete "${league.name}" and all its saved rosters? This can't be undone.`)) return;
+  leagues = leagues.filter(l => l.id !== id);
+  persistLeagues();
+  activeLeagueId = 'scratch'; teamAId = 'A'; teamBId = 'B';
+  resetTradeState();
+}
+function resetTradeState(){
+  sendAway = { A: new Set(), B: new Set() };
+  searchQuery = { A: '', B: '' };
+  recommendations = null;
+}
+function switchLeague(id){
+  activeLeagueId = id;
+  const league = activeLeague();
+  teamAId = league.teams[0].id;
+  teamBId = league.teams.length > 1 ? league.teams[1].id : league.teams[0].id;
+  resetTradeState();
+}
+function setTeamSlot(side, teamId){
+  if (side === 'A') teamAId = teamId; else teamBId = teamId;
+  resetTradeState();
+}
+
+// A player can't be on both sides of the SAME proposed trade -- this only needs to hold between
+// whichever two teams are currently loaded into the builder, not across the whole league (a
+// player can very much sit on a third team's saved roster while you edit these two).
+function takenNamesForSides(){
+  return new Set([...currentTeam('A').roster, ...currentTeam('B').roster]);
+}
+
+function addPlayer(side, name){
+  if (!POOL_BY_NAME.has(name)) return;
+  if (takenNamesForSides().has(name)) return;
+  currentTeam(side).roster.push(name);
+  searchQuery[side] = '';
+  if (activeLeagueId !== 'scratch') persistLeagues();
+  render();
+}
+function removePlayer(side, name){
+  const t = currentTeam(side);
+  t.roster = t.roster.filter(n => n !== name);
+  sendAway[side].delete(name);
+  if (activeLeagueId !== 'scratch') persistLeagues();
+  render();
+}
+function toggleSend(side, name){
+  const s = sendAway[side];
+  if (s.has(name)) s.delete(name); else s.add(name);
+  render();
+}
+function renameTeam(side, newName){
+  currentTeam(side).name = newName;
+  if (activeLeagueId !== 'scratch') persistLeagues();
+}
+function applyTrade(){
+  const a = currentTeam('A'), b = currentTeam('B');
+  const aSend = [...sendAway.A], bSend = [...sendAway.B];
+  a.roster = a.roster.filter(n => !sendAway.A.has(n)).concat(bSend);
+  b.roster = b.roster.filter(n => !sendAway.B.has(n)).concat(aSend);
+  resetTradeState();
+  if (activeLeagueId !== 'scratch') persistLeagues();
+  render();
+}
+
+function searchMatches(side){
+  const q = searchQuery[side].trim().toLowerCase();
+  if (!q) return [];
+  const taken = takenNamesForSides();
+  return POOL
+    .filter(p => !taken.has(p.name) && p.name.toLowerCase().includes(q))
+    .sort((a,b) => b.ros_par - a.ros_par)
+    .slice(0, 8);
+}
+
+// =========================================================================================
+// Trade recommendations: for a chosen team, search every OTHER team in the same league for
+// 1-for-1, 2-for-1, and 1-for-2 trades (REC_SHAPES -- the agreed v1 scope; no 2-for-2+ packages,
+// no multi-team trades) that (a) genuinely improve the chosen team's optimal starting lineup and
+// (b) don't leave the other side clearly worse off. Both conditions fold through the SAME
+// optimalLineupPAR() the manual trade grade uses, so a recommendation and a manually-built trade
+// are graded identically -- there's no separate, looser scoring path for suggestions.
+// =========================================================================================
+const REC_SHAPES = [[1,1],[2,1],[1,2]]; // [players team sends, players team receives]
+// "Fair to both" floor: the OTHER team's starting-lineup impact must stay at C+ or better
+// (see GRADE_BANDS) -- i.e. a recommendation never suggests fleecing the other side, only trades
+// a reasonable manager would plausibly accept. This threshold is a documented calibration
+// choice, not backtested (same category as the grade bands themselves -- see HANDOFF.md).
+const REC_FAIRNESS_FLOOR = -4;
+const REC_MAX_PER_OPPONENT = 3; // caps how many of the results can come from one opponent, so
+                                 // the top-10 list isn't just one team's roster over and over
+const REC_MAX_RESULTS = 10;
+
+function combosOf(arr, n){
+  if (n === 1) return arr.map(x => [x]);
+  const out = [];
+  for (let i=0; i<arr.length; i++) for (let j=i+1; j<arr.length; j++) out.push([arr[i], arr[j]]);
+  return out;
+}
+
+function findRecommendations(teamId){
+  const league = activeLeague();
+  const team = teamById(league, teamId);
+  const teamPlayers = hydrate(team.roster);
+  if (!teamPlayers.length) return [];
+  const baselineX = optimalLineupPAR(teamPlayers);
+  const all = [];
+
+  league.teams.forEach(opp => {
+    if (opp.id === teamId) return;
+    const oppPlayers = hydrate(opp.roster);
+    if (!oppPlayers.length) return;
+    const baselineOpp = optimalLineupPAR(oppPlayers);
+    const perOpp = [];
+
+    REC_SHAPES.forEach(([giveN, getN]) => {
+      if (teamPlayers.length < giveN || oppPlayers.length < getN) return;
+      combosOf(teamPlayers, giveN).forEach(give => {
+        const giveNames = new Set(give.map(p => p.name));
+        const xRemaining = teamPlayers.filter(p => !giveNames.has(p.name));
+        combosOf(oppPlayers, getN).forEach(get => {
+          const getNames = new Set(get.map(p => p.name));
+          const oppRemaining = oppPlayers.filter(p => !getNames.has(p.name));
+          const deltaX = optimalLineupPAR(xRemaining.concat(get)) - baselineX;
+          const deltaOpp = optimalLineupPAR(oppRemaining.concat(give)) - baselineOpp;
+          if (deltaX > 0 && deltaOpp >= REC_FAIRNESS_FLOOR){
+            perOpp.push({
+              opponentId: opp.id, opponentName: opp.name,
+              give: give.map(p => p.name), get: get.map(p => p.name), deltaX, deltaOpp,
+            });
+          }
+        });
+      });
+    });
+
+    perOpp.sort((a,b) => b.deltaX - a.deltaX);
+    all.push(...perOpp.slice(0, REC_MAX_PER_OPPONENT));
+  });
+
+  all.sort((a,b) => b.deltaX - a.deltaX);
+  return all.slice(0, REC_MAX_RESULTS);
+}
+
+function loadRecommendation(idx){
+  const r = recommendations.results[idx];
+  teamBId = r.opponentId;
+  sendAway = { A: new Set(r.give), B: new Set(r.get) };
+  render();
+}
+
+// =========================================================================================
+// Rendering
+// =========================================================================================
+function leagueBarHTML(){
+  const opts = leagues.map(l =>
+    `<option value="${escAttr(l.id)}" ${l.id===activeLeagueId?'selected':''}>${esc(l.name)}${l.id!=='scratch' ? ` (${l.teamCount}-team)` : ''}</option>`
+  ).join('');
+  return `
+    <div class="league-bar">
+      <select id="leagueSelect">${opts}</select>
+      <button class="reset-btn small" data-action="newLeague">+ New league</button>
+      <button class="reset-btn small" data-action="importLeague">Import league (JSON)</button>
+      ${activeLeagueId !== 'scratch' ? `<button class="reset-btn small" data-action="deleteLeague">Delete league</button>` : ''}
+      ${!storageOK ? `<span class="storage-warn">This browser is blocking saved data &mdash; leagues won't persist after you reload.</span>` : ''}
+    </div>
+    ${newLeagueForm ? newLeagueFormHTML() : ''}
+    ${importLeagueForm ? importLeagueFormHTML() : ''}
+    ${activeLeagueId === 'scratch'
+      ? `<div class="league-hint">Quick Trade mode isn't saved. Create a league to enter every team's full roster once, keep it for the rest of the season, and unlock trade recommendations.</div>`
+      : ''}
+  `;
+}
+function newLeagueFormHTML(){
+  return `
+    <div class="new-league-form">
+      <input type="text" id="nlName" placeholder="League name">
+      <select id="nlSize"><option value="10">10 teams</option><option value="12">12 teams</option></select>
+      <button class="reset-btn small primary" data-action="createLeague">Create</button>
+      <button class="reset-btn small" data-action="cancelNewLeague">Cancel</button>
+    </div>`;
+}
+function importLeagueFormHTML(){
+  return `
+    <div class="new-league-form" style="flex-direction:column; align-items:stretch;">
+      <div class="league-hint" style="margin-bottom:0;">Paste a league export:
+        <code>{"name": "...", "teams": [{"name": "...", "roster": ["Player Name", ...]}]}</code>
+        Player names should match this tool's naming (a mismatch just shows as an unrecognized
+        player, roster data is never dropped).</div>
+      <textarea id="ilJson" rows="6" placeholder='{"name":"My League","teams":[{"name":"Team 1","roster":["Jahmyr Gibbs", ...]}]}'
+        style="width:100%; background:var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:8px; color:var(--chalk); font-family:'JetBrains Mono',monospace; font-size:12px; padding:9px 11px;"></textarea>
+      <div id="ilError" style="color:var(--bad); font-size:11.5px; display:none;"></div>
+      <div style="display:flex; gap:8px;">
+        <button class="reset-btn small primary" data-action="doImportLeague">Import</button>
+        <button class="reset-btn small" data-action="cancelImportLeague">Cancel</button>
+      </div>
+    </div>`;
+}
+
+function teamSelectorsHTML(){
+  if (activeLeagueId === 'scratch') return '';
+  const league = activeLeague();
+  const optsFor = (excludeId, selectedId) => league.teams.map(t =>
+    `<option value="${escAttr(t.id)}" ${t.id===selectedId?'selected':''} ${t.id===excludeId?'disabled':''}>${esc(t.name)} (${t.roster.length})</option>`
+  ).join('');
+  return `
+    <div class="team-select-row">
+      <label>Team A<select id="teamASelect">${optsFor(teamBId, teamAId)}</select></label>
+      <label>Team B<select id="teamBSelect">${optsFor(teamAId, teamBId)}</select></label>
+    </div>`;
+}
+
+function panelHTML(side){
+  const team = currentTeam(side);
+  const rosterPlayers = hydrate(team.roster);
+  const lineupPAR = optimalLineupPAR(rosterPlayers);
+  const matches = searchMatches(side);
+  const resultsHTML = searchQuery[side].trim()
+    ? (matches.length
+        ? matches.map(p => `
+            <div class="search-result" data-side="${side}" data-action="add" data-name="${escAttr(p.name)}">
+              <span class="posrank ${p.pos}">${POS_RANK.get(p.name)}</span>
+              <span style="flex:1;min-width:0;">
+                <div class="roster-name">${esc(p.name)}</div>
+                <div class="roster-team">${esc(p.team||'')} &middot; RoS PAR ${p.ros_par}</div>
+              </span>
+            </div>`).join('')
+        : `<div class="search-empty">No matches (or already on one of these two rosters)</div>`)
+    : '';
+
+  const rosterHTML = rosterPlayers.length
+    ? rosterPlayers.slice().sort((a,b) => b.ros_par - a.ros_par).map(p => `
+        <div class="roster-row ${sendAway[side].has(p.name) ? 'marked' : ''}">
+          <span class="posrank ${p.unknown ? 'unk' : p.pos}">${p.unknown ? '?' : POS_RANK.get(p.name)}</span>
+          <span class="roster-meta">
+            <div class="roster-name">${esc(p.name)}</div>
+            <div class="roster-team">${p.unknown ? 'not in current value pool' : `${esc(p.team||'')} &middot; ${p.games_played}GP played, ${p.games_remaining} left`}</div>
+          </span>
+          <span class="roster-nums">
+            <div class="roster-par">${p.ros_par}</div>
+            <div class="roster-parlabel">RoS PAR</div>
+          </span>
+          <button class="send-toggle ${sendAway[side].has(p.name) ? 'on' : ''}" data-side="${side}" data-action="toggle" data-name="${escAttr(p.name)}" title="Mark as sent in this trade">&#8644;</button>
+          <button class="remove-btn" data-side="${side}" data-action="remove" data-name="${escAttr(p.name)}" title="Remove from roster">&times;</button>
+        </div>`).join('')
+    : `<div class="roster-empty">No players yet &mdash; search above to build this team's full current roster.</div>`;
+
+  return `
+    <div class="team-head">
+      <input class="team-name-input" data-side="${side}" value="${escAttr(team.name)}">
+      <span class="lineup-par">Lineup PAR <b>${lineupPAR}</b></span>
+    </div>
+    <div class="search-box">
+      <span class="search-icon">&#128269;</span>
+      <input type="text" data-side="${side}" class="team-search" placeholder="Search a player to add to this roster..." value="${escAttr(searchQuery[side])}">
+      ${resultsHTML ? `<div class="search-results">${resultsHTML}</div>` : ''}
+    </div>
+    <div class="roster-list">${rosterHTML}</div>
+  `;
+}
+
+function summaryHTML(){
+  const teamA = currentTeam('A'), teamB = currentTeam('B');
+  const aRoster = hydrate(teamA.roster), bRoster = hydrate(teamB.roster);
+  const aSend = aRoster.filter(p => sendAway.A.has(p.name));
+  const bSend = bRoster.filter(p => sendAway.B.has(p.name));
+  if (!aSend.length && !bSend.length){
+    return { summary: `<div class="summary-empty"><div class="big">No trade proposed yet</div>Use the &#8644; toggle on a roster row to mark a player as sent, on either side.</div>`, method: methodologyHTML() };
+  }
+
+  const aAfter = aRoster.filter(p => !sendAway.A.has(p.name)).concat(bSend);
+  const bAfter = bRoster.filter(p => !sendAway.B.has(p.name)).concat(aSend);
+  const aBefore = optimalLineupPAR(aRoster);
+  const bBefore = optimalLineupPAR(bRoster);
+  const aDelta = optimalLineupPAR(aAfter) - aBefore;
+  const bDelta = optimalLineupPAR(bAfter) - bBefore;
+  const aRawValue = sumPAR(bSend) - sumPAR(aSend);
+  const bRawValue = sumPAR(aSend) - sumPAR(bSend);
+
+  const card = (label, sent, received, rawValue, delta) => {
+    const g = gradeFor(delta);
+    return `
+      <div class="grade-card">
+        <div class="grade-badge ${g.cls}">${g.grade}</div>
+        <div class="grade-body">
+          <div class="grade-team">${esc(label)}</div>
+          <div class="grade-line">Raw value change: <b>${rawValue >= 0 ? '+' : ''}${rawValue}</b> RoS PAR</div>
+          <div class="grade-line">Starting-lineup impact: <b>${delta >= 0 ? '+' : ''}${delta}</b> RoS PAR</div>
+          <div class="grade-players">
+            <b>Sends:</b> ${sent.length ? sent.map(p => esc(p.name)).join(', ') : '&mdash;'}<br>
+            <b>Receives:</b> ${received.length ? received.map(p => esc(p.name)).join(', ') : '&mdash;'}
+          </div>
+        </div>
+      </div>`;
+  };
+
+  const applyBtn = activeLeagueId !== 'scratch'
+    ? `<div class="apply-row"><button class="reset-btn primary" data-action="applyTrade">Apply this trade to the saved rosters</button></div>`
+    : '';
+
+  const summary = `<div class="grade-grid">
+      ${card(teamA.name, aSend, bSend, aRawValue, aDelta)}
+      ${card(teamB.name, bSend, aSend, bRawValue, bDelta)}
+    </div>${applyBtn}`;
+  return { summary, method: methodologyHTML() };
+}
+
+function methodologyHTML(){
+  return `
+    <p><b>How the grade works:</b> "Raw value change" is just the rest-of-season PAR (points above a
+    replacement-level player, for the games left this season) each side gains minus what it gives
+    up. "Starting-lineup impact" is the better read on whether the trade actually helps &mdash; it's
+    the change in that team's optimal 1QB/2RB/2WR/1TE/2FLEX starting lineup value, so it naturally
+    rewards fixing a real starting hole and discounts a trade that only adds bench depth behind an
+    already-strong position. The letter grade is based on starting-lineup impact, not raw value.</p>
+    <p><b>How recommendations work:</b> for a chosen team, every other team in the league is checked
+    for 1-for-1, 2-for-1, and 1-for-2 combinations. A trade is only suggested if it's a genuine
+    starting-lineup improvement for your team AND the other team's own starting-lineup impact
+    doesn't drop below a C+ &mdash; so recommendations should be ones the other side would plausibly
+    say yes to, not lopsided offers. Ranked by how much they help your team, most helpful first.</p>`;
+}
+
+function recPanelHTML(){
+  if (activeLeagueId === 'scratch') return '';
+  const league = activeLeague();
+  const teamA = currentTeam('A');
+  const showResults = recommendations && recommendations.forTeamId === teamAId;
+  return `
+    <div class="rec-panel">
+      <div class="rec-head">
+        <div class="summary-title" style="margin:0;">Trade recommendations for ${esc(teamA.name)}</div>
+        <button class="reset-btn small primary" data-action="findRecs">Find trades</button>
+      </div>
+      <div class="rec-hint">Checks every other team in ${esc(league.name)} for 1-for-1 and 2-for-1 (or 1-for-2)
+        trades that improve ${esc(teamA.name)}'s starting lineup while staying fair to the other side.
+        Switch which team is "Team A" above to get recommendations for a different team.</div>
+      <div id="recResults">${showResults ? recResultsHTML() : ''}</div>
+    </div>`;
+}
+function recResultsHTML(){
+  const results = recommendations.results;
+  if (!results.length){
+    return `<div class="summary-empty">No fair, team-improving trades found in this league right now.</div>`;
+  }
+  return results.map((r, i) => `
+    <div class="rec-card">
+      <div class="rec-card-head">
+        <span class="grade-badge small ${gradeFor(r.deltaX).cls}">${gradeFor(r.deltaX).grade}</span>
+        <div>
+          <div class="rec-opp">vs. ${esc(r.opponentName)}</div>
+          <div class="rec-lines">Sends: ${r.give.map(esc).join(', ')} &rarr; Receives: ${r.get.map(esc).join(', ')}</div>
+          <div class="rec-lines">Your impact: <b>${r.deltaX>=0?'+':''}${r.deltaX}</b> &middot; Their impact: <b>${r.deltaOpp>=0?'+':''}${r.deltaOpp}</b></div>
+        </div>
+      </div>
+      <button class="reset-btn small" data-action="loadRec" data-idx="${i}">Load into builder</button>
+    </div>`).join('');
+}
+
+function sumPAR(list){ return list.reduce((s,p) => s + p.ros_par, 0); }
+function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function escAttr(s){ return esc(s).replace(/'/g, '&#39;'); }
+
+function render(){
+  document.getElementById('leagueBar').innerHTML = leagueBarHTML();
+  document.getElementById('teamSelectors').innerHTML = teamSelectorsHTML();
+  document.getElementById('panelA').innerHTML = panelHTML('A');
+  document.getElementById('panelB').innerHTML = panelHTML('B');
+  const { summary, method } = summaryHTML();
+  document.getElementById('summaryOut').innerHTML = summary;
+  document.getElementById('methodology').innerHTML = method;
+  document.getElementById('recPanel').innerHTML = recPanelHTML();
+  document.getElementById('subtitle').textContent =
+    activeLeagueId === 'scratch'
+      ? `Quick two-team mode. Values refreshed: ${ROS_REFRESH_LABEL}.`
+      : `Editing ${activeLeague().name}. Values refreshed: ${ROS_REFRESH_LABEL}.`;
+}
+
+document.body.addEventListener('input', e => {
+  if (e.target.classList.contains('team-search')){
+    searchQuery[e.target.dataset.side] = e.target.value;
+    render();
+    const el = document.querySelector(`.team-search[data-side="${e.target.dataset.side}"]`);
+    if (el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+  if (e.target.classList.contains('team-name-input')){
+    const side = e.target.dataset.side;
+    renameTeam(side, e.target.value);
+    render();
+    const el = document.querySelector(`.team-name-input[data-side="${side}"]`);
+    if (el){ el.focus(); el.setSelectionRange(el.value.length, el.value.length); }
+  }
+});
+
+document.body.addEventListener('change', e => {
+  if (e.target.id === 'leagueSelect'){ switchLeague(e.target.value); render(); }
+  if (e.target.id === 'teamASelect'){ setTeamSlot('A', e.target.value); render(); }
+  if (e.target.id === 'teamBSelect'){ setTeamSlot('B', e.target.value); render(); }
+});
+
+document.body.addEventListener('click', e => {
+  const t = e.target.closest('[data-action]');
+  if (!t) return;
+  const { side, action, name, idx } = t.dataset;
+  if (action === 'add') addPlayer(side, name);
+  if (action === 'remove') removePlayer(side, name);
+  if (action === 'toggle') toggleSend(side, name);
+  if (action === 'applyTrade') applyTrade();
+  if (action === 'newLeague'){ newLeagueForm = true; importLeagueForm = false; render(); }
+  if (action === 'cancelNewLeague'){ newLeagueForm = false; render(); }
+  if (action === 'deleteLeague') { deleteLeague(activeLeagueId); render(); }
+  if (action === 'createLeague'){
+    const name = document.getElementById('nlName').value;
+    const size = parseInt(document.getElementById('nlSize').value, 10);
+    createLeague(name, size);
+    render();
+  }
+  if (action === 'importLeague'){ importLeagueForm = true; newLeagueForm = false; render(); }
+  if (action === 'cancelImportLeague'){ importLeagueForm = false; render(); }
+  if (action === 'doImportLeague'){
+    const raw = document.getElementById('ilJson').value;
+    const errEl = document.getElementById('ilError');
+    try {
+      const data = JSON.parse(raw);
+      importLeague(data);
+      render();
+    } catch (e){
+      errEl.textContent = 'Could not import: ' + e.message;
+      errEl.style.display = 'block';
+    }
+  }
+  if (action === 'findRecs'){
+    document.getElementById('recResults').innerHTML = `<div class="summary-empty">Searching every matchup&hellip;</div>`;
+    setTimeout(() => {
+      recommendations = { forTeamId: teamAId, results: findRecommendations(teamAId) };
+      render();
+    }, 20);
+  }
+  if (action === 'loadRec') loadRecommendation(parseInt(idx, 10));
+});
+
+render();
+</script>
+</body>
+</html>
