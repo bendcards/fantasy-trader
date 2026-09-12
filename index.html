@@ -5,6 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Fantasy Trader</title>
 <meta name="description" content="Build a real fantasy roster, propose a trade, and get a starting-lineup-based grade for both sides. Rest-of-season player values, updated weekly.">
+<meta property="og:title" content="Fantasy Trader">
+<meta property="og:description" content="Build a real fantasy roster, propose a trade, and get a starting-lineup-based grade for both sides.">
+<meta property="og:image" content="https://fantasytrader.online/hero.jpg">
+<meta property="og:url" content="https://fantasytrader.online/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Fantasy Trader">
+<meta name="twitter:description" content="Build a real fantasy roster, propose a trade, and get a starting-lineup-based grade for both sides.">
+<meta name="twitter:image" content="https://fantasytrader.online/hero.jpg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600&family=JetBrains+Mono:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
@@ -50,12 +59,26 @@
     color: var(--chalk-faint); letter-spacing:0.5px;
   }
 
-  .masthead{ margin-bottom:18px; }
-  .masthead h1{
-    font-family:'Oswald', sans-serif; font-weight:600; font-size:26px; letter-spacing:0.5px;
-    text-transform: uppercase; margin:0 0 4px;
+  /* Hero banner: hero.jpg (2400x1260, an SVG illustration of two roster cards with a trade
+     arrow between them -- same visual language as the app's own roster-row/grade-card
+     components) sits full-bleed above the wrap as a plain image strip, with the masthead text
+     flowing in normal document order right below it -- deliberately NOT an overlaid-text-on-image
+     treatment. That was tried first and dropped: which vertical slice of a fixed-aspect image
+     ends up visible under object-fit:cover depends continuously on the container's own aspect
+     ratio, which changes with viewport width -- there's no single crop/overlay-height pairing
+     that stays clear of the artwork at every width from a phone up through a wide desktop
+     window. Stacking the two removes the interaction entirely: the image crops however it
+     crops, the text always has its own clear space, at any width. */
+  .hero-banner{ width:100%; background: var(--bg); }
+  .hero-banner img{
+    display:block; width:100%; height:220px; object-fit:cover; object-position:center;
   }
-  .masthead p{ margin:0; color: var(--chalk-dim); font-size:13px; }
+  .hero-caption{ max-width:920px; margin:0 auto; padding:18px 18px 0; }
+  .hero-caption h1{
+    font-family:'Oswald', sans-serif; font-weight:600; font-size:26px; letter-spacing:0.5px;
+    text-transform: uppercase; margin:0 0 4px; color: var(--chalk);
+  }
+  .hero-caption p{ margin:0; color: var(--chalk-dim); font-size:13px; }
   .eyebrow{ font-family:'JetBrains Mono', monospace; font-size:11px; color: var(--yard); letter-spacing:1.5px; text-transform:uppercase; margin-bottom:6px; }
 
   .reset-btn{
@@ -268,7 +291,8 @@
   .rec-lines b{ color: var(--chalk); font-family:'JetBrains Mono', monospace; }
 
   @media (max-width: 420px){
-    .masthead h1{ font-size:21px; }
+    .hero-banner img{ height:150px; }
+    .hero-caption h1{ font-size:22px; }
     .grade-badge{ width:46px; height:46px; font-size:18px; }
 
     /* Same fix the Draft Board already applies at this width (HANDOFF.md sec 7): a roster row
@@ -288,13 +312,17 @@
 </head>
 <body>
 <div class="version-badge">RoS v2</div>
-<div class="wrap">
 
-  <div class="masthead">
-    <div class="eyebrow">2026 &middot; Rest-of-season value &middot; regenerate weekly</div>
-    <h1>Fantasy Trader</h1>
-    <p id="subtitle">Add each team's full roster, mark who's changing hands, and get a trade grade for each side.</p>
-  </div>
+<div class="hero-banner">
+  <img src="hero.jpg" alt="Two roster cards connected by a trade arrow">
+</div>
+<div class="hero-caption">
+  <div class="eyebrow">2026 &middot; Rest-of-season value &middot; regenerate weekly</div>
+  <h1>Fantasy Trader</h1>
+  <p id="subtitle">Add each team's full roster, mark who's changing hands, and get a trade grade for each side.</p>
+</div>
+
+<div class="wrap">
 
   <div id="pendingImportBanner"></div>
 
