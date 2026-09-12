@@ -90,6 +90,41 @@
 
   .league-hint{ font-size:11.5px; color: var(--chalk-faint); margin-bottom:16px; line-height:1.5; }
 
+  /* ---- Import league: Sleeper / ESPN bookmarklet / raw JSON ---- */
+  .import-panel{
+    background: var(--panel); border:0.5px solid var(--line-strong); border-radius:10px;
+    padding:14px; margin-bottom:14px; display:flex; flex-direction:column; gap:16px;
+  }
+  .import-section-title{
+    font-family:'Oswald', sans-serif; font-weight:600; font-size:13px; text-transform:uppercase;
+    letter-spacing:0.5px; color: var(--chalk-dim); margin-bottom:6px;
+  }
+  .import-row{ display:flex; gap:8px; flex-wrap:wrap; }
+  .import-row input[type=text]{
+    flex:1; min-width:180px; background: var(--panel-raised); border:0.5px solid var(--line-strong);
+    border-radius:8px; padding:9px 11px; color: var(--chalk); font-size:13px; font-family:'Inter', sans-serif;
+  }
+  .import-row input[type=text]:focus{ outline:none; border-color: var(--yard); }
+  .import-error{ color: var(--bad); font-size:11.5px; margin-top:6px; }
+  .import-json-area{
+    width:100%; background: var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:8px;
+    color: var(--chalk); font-family:'JetBrains Mono', monospace; font-size:12px; padding:9px 11px;
+  }
+  .bookmarklet-btn{
+    display:inline-block; background: var(--yard); color: var(--bg); font-weight:600; font-size:13px;
+    padding:9px 16px; border-radius:8px; text-decoration:none; cursor:grab; white-space:nowrap;
+  }
+  .bookmarklet-btn:active{ cursor:grabbing; }
+  .import-steps{ margin:8px 0 0; padding-left:18px; color: var(--chalk-faint); font-size:11.5px; line-height:1.9; }
+  .import-steps li{ margin-bottom:2px; }
+
+  .pending-import-banner{
+    background: var(--panel-raised); border:1px solid var(--yard); border-radius:10px;
+    padding:14px 16px; margin-bottom:16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;
+  }
+  .pending-import-banner .pib-text{ flex:1; min-width:200px; font-size:13px; color: var(--chalk); }
+  .pending-import-banner .pib-text b{ color: var(--yard); }
+
   .team-select-row{ display:flex; gap:10px; flex-wrap:wrap; margin-bottom:12px; }
   .team-select-row label{ flex:1; min-width:150px; display:flex; flex-direction:column; gap:4px; font-size:11px; color: var(--chalk-faint); text-transform:uppercase; letter-spacing:0.5px; }
   .team-select-row select{ width:100%; }
@@ -261,6 +296,8 @@
     <p id="subtitle">Add each team's full roster, mark who's changing hands, and get a trade grade for each side.</p>
   </div>
 
+  <div id="pendingImportBanner"></div>
+
   <div id="leagueBar"></div>
 
   <div id="teamSelectors"></div>
@@ -305,6 +342,19 @@ const POS_RANK = new Map();
       .forEach((p,i) => POS_RANK.set(p.name, pos + (i+1)));
   });
 }
+
+// ---- ESPN import bookmarklet ----
+// Runs ON fantasy.espn.com (dragged into the bookmarks bar, clicked while logged into ESPN and
+// viewing a league/team page), not on this site -- that's the whole point: ESPN's private-league
+// API needs the visitor's own ESPN login cookies attached, which only happens for a request that
+// originates from an espn.com page. This site never sees or touches that login. The script reads
+// leagueId/seasonId from the current ESPN page's URL, fetches that league's roster data from
+// ESPN's own API (lm-api-reads.fantasy.espn.com -- confirmed via a real network capture, not
+// guessed; see HANDOFF.md), reshapes it into this app's {name, teams:[{name,roster}]} import
+// shape, and opens this site in a new tab with the data attached as a URL hash fragment
+// (#import=...) -- fragments never reach a server, so the data only ever exists client-side, in
+// the transfer between these two tabs. checkHashImport() below reads it back out on load.
+const ESPN_BOOKMARKLET_HREF = "javascript:(function(){var m=location.href.match(/leagueId=(\\d+)/);var s=location.href.match(/seasonId=(\\d+)/);if(!m){alert('Fantasy Trader: could not find a leagueId in this URL. Open your ESPN league or team page first.');return;}var lid=m[1];var sid=s?s[1]:new Date().getFullYear();var url='https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/'+sid+'/segments/0/leagues/'+lid+'?view=mRoster&view=mTeam&view=mSettings';fetch(url,{credentials:'include'}).then(function(r){if(!r.ok)throw new Error('ESPN returned '+r.status+' -- make sure you are logged in to ESPN.');return r.json();}).then(function(d){var teams=d.teams.map(function(t){return{name:(t.name||('Team '+t.id)).trim(),roster:t.roster.entries.map(function(e){return e.playerPoolEntry.player.fullName;}).filter(function(n){return !/D\\/ST$/.test(n);})};});var payload={name:(d.settings&&d.settings.name)||'ESPN League',teams:teams};window.open('https://fantasytrader.online/#import='+encodeURIComponent(JSON.stringify(payload)),'_blank');}).catch(function(e){alert('Fantasy Trader import failed: '+e.message);});})();";
 
 // ---- League roster construction (HANDOFF.md sec 1: 1QB/2RB/2WR/1TE/2FLEX) drives the
 // "optimal starting lineup" calculation both the grade and the recommendation engine fold
@@ -395,6 +445,8 @@ let sendAway = { A: new Set(), B: new Set() };
 let newLeagueForm = false;
 let importLeagueForm = false;
 let recommendations = null; // { forTeamId, results: [...] } | null
+let pendingImport = null; // {name, teams:[...]} | null -- staged import from #import= hash, awaiting confirm
+let sleeperImporting = false;
 
 function activeLeague(){ return leagues.find(l => l.id === activeLeagueId); }
 function teamById(league, id){ return league.teams.find(t => t.id === id); }
@@ -451,6 +503,58 @@ function importLeague(data){
   newLeagueForm = false;
   importLeagueForm = false;
 }
+
+// Sleeper's league/roster/user endpoints are all public and CORS-open -- confirmed with a real
+// cross-origin fetch during this build, from a page on a totally different origin, with no
+// login of any kind -- so unlike ESPN this needs no bookmarklet, no extra step: paste a URL,
+// fetch straight from this page, done. The one real cost is /v1/players/nfl, which Sleeper's own
+// docs say is large (several MB) and shouldn't be polled frequently -- fine for an occasional,
+// user-initiated "import my league" click, not fine to call on every render, so it's only ever
+// fetched here, once per import.
+async function importFromSleeperUrl(input){
+  const m = String(input || '').match(/(\d{5,})/);
+  if (!m) throw new Error('Could not find a Sleeper league ID in that URL.');
+  const leagueId = m[1];
+
+  const [league, rosters, users] = await Promise.all([
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}`)
+      .then(r => { if (!r.ok) throw new Error('Sleeper league not found -- check the URL or ID.'); return r.json(); }),
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}/rosters`).then(r => r.json()),
+    fetch(`https://api.sleeper.app/v1/league/${leagueId}/users`).then(r => r.json()),
+  ]);
+  if (!league || !Array.isArray(rosters)) throw new Error('Sleeper league not found -- check the URL or ID.');
+
+  const players = await fetch('https://api.sleeper.app/v1/players/nfl').then(r => r.json());
+  const nameById = {};
+  Object.keys(players).forEach(id => {
+    const p = players[id];
+    if (p && p.full_name && p.position !== 'DEF' && p.position !== 'K') nameById[id] = p.full_name;
+  });
+
+  const nameByOwner = {};
+  (users || []).forEach(u => { nameByOwner[u.user_id] = (u.metadata && u.metadata.team_name) || u.display_name; });
+
+  const teams = rosters.map((r, i) => ({
+    name: nameByOwner[r.owner_id] || ('Team ' + (i + 1)),
+    roster: (r.players || []).map(id => nameById[id]).filter(Boolean),
+  }));
+  return { name: league.name || 'Sleeper League', teams };
+}
+
+// Reads a league staged by the ESPN bookmarklet (window.open('...#import=' + encoded)) into
+// pendingImport for a confirm step -- never auto-imports without the visitor seeing what it is
+// first. The hash is stripped from the address bar immediately either way so a reload/share of
+// the URL doesn't re-trigger it or leave a large data blob sitting in the visible address bar.
+function checkHashImport(){
+  if (!location.hash.startsWith('#import=')) return;
+  const raw = location.hash.slice('#import='.length);
+  history.replaceState(null, '', location.pathname + location.search);
+  try {
+    const data = JSON.parse(decodeURIComponent(raw));
+    if (data && Array.isArray(data.teams) && data.teams.length) pendingImport = data;
+  } catch (e){ /* malformed hash -- silently ignore, nothing to import */ }
+}
+
 function deleteLeague(id){
   const league = leagues.find(l => l.id === id);
   if (!confirm(`Delete "${league.name}" and all its saved rosters? This can't be undone.`)) return;
@@ -635,18 +739,46 @@ function newLeagueFormHTML(){
 }
 function importLeagueFormHTML(){
   return `
-    <div class="new-league-form" style="flex-direction:column; align-items:stretch;">
-      <div class="league-hint" style="margin-bottom:0;">Paste a league export:
-        <code>{"name": "...", "teams": [{"name": "...", "roster": ["Player Name", ...]}]}</code>
-        Player names should match this tool's naming (a mismatch just shows as an unrecognized
-        player, roster data is never dropped).</div>
-      <textarea id="ilJson" rows="6" placeholder='{"name":"My League","teams":[{"name":"Team 1","roster":["Jahmyr Gibbs", ...]}]}'
-        style="width:100%; background:var(--panel-raised); border:0.5px solid var(--line-strong); border-radius:8px; color:var(--chalk); font-family:'JetBrains Mono',monospace; font-size:12px; padding:9px 11px;"></textarea>
-      <div id="ilError" style="color:var(--bad); font-size:11.5px; display:none;"></div>
-      <div style="display:flex; gap:8px;">
-        <button class="reset-btn small primary" data-action="doImportLeague">Import</button>
-        <button class="reset-btn small" data-action="cancelImportLeague">Cancel</button>
+    <div class="import-panel">
+
+      <div>
+        <div class="import-section-title">Import from Sleeper</div>
+        <div class="league-hint" style="margin-bottom:8px;">Paste your Sleeper league URL or ID &mdash;
+          Sleeper's league data is public, so this works instantly for any league, no login needed.</div>
+        <div class="import-row">
+          <input type="text" id="ilSleeperUrl" placeholder="https://sleeper.com/leagues/1234567890123456789">
+          <button class="reset-btn small primary" data-action="doImportSleeper">Import</button>
+        </div>
+        <div id="ilSleeperError" class="import-error" style="display:none;"></div>
       </div>
+
+      <div>
+        <div class="import-section-title">Import from ESPN</div>
+        <div class="league-hint" style="margin-bottom:0;">ESPN leagues need one extra step, since only
+          your own logged-in browser can read your league's data &mdash; this site never sees your ESPN
+          login.
+          <ol class="import-steps">
+            <li>Drag this to your bookmarks bar: <a class="bookmarklet-btn" href="${ESPN_BOOKMARKLET_HREF}" onclick="return false;">&#128229; Import to Fantasy Trader</a></li>
+            <li>Log into ESPN Fantasy Football and open your league (any team or league page works)</li>
+            <li>Click the bookmark &mdash; it opens a new tab here with your league ready to import</li>
+          </ol>
+        </div>
+      </div>
+
+      <div>
+        <div class="import-section-title">Or paste JSON directly</div>
+        <div class="league-hint" style="margin-bottom:8px;">
+          <code>{"name": "...", "teams": [{"name": "...", "roster": ["Player Name", ...]}]}</code>
+          Player names should match this tool's naming (a mismatch just shows as an unrecognized
+          player, roster data is never dropped).</div>
+        <textarea id="ilJson" rows="5" class="import-json-area" placeholder='{"name":"My League","teams":[{"name":"Team 1","roster":["Jahmyr Gibbs", ...]}]}'></textarea>
+        <div id="ilError" class="import-error" style="display:none;"></div>
+        <div style="display:flex; gap:8px; margin-top:8px;">
+          <button class="reset-btn small primary" data-action="doImportLeague">Import JSON</button>
+        </div>
+      </div>
+
+      <div><button class="reset-btn small" data-action="cancelImportLeague">Close</button></div>
     </div>`;
 }
 
@@ -813,7 +945,19 @@ function sumPAR(list){ return list.reduce((s,p) => s + p.ros_par, 0); }
 function esc(s){ return (s||'').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 function escAttr(s){ return esc(s).replace(/'/g, '&#39;'); }
 
+function pendingImportBannerHTML(){
+  if (!pendingImport) return '';
+  return `
+    <div class="pending-import-banner">
+      <div class="pib-text">Found a league from the link you opened: <b>${esc(pendingImport.name)}</b>
+        (${pendingImport.teams.length} teams). Import it?</div>
+      <button class="reset-btn small primary" data-action="confirmPendingImport">Import</button>
+      <button class="reset-btn small" data-action="discardPendingImport">Discard</button>
+    </div>`;
+}
+
 function render(){
+  document.getElementById('pendingImportBanner').innerHTML = pendingImportBannerHTML();
   document.getElementById('leagueBar').innerHTML = leagueBarHTML();
   document.getElementById('teamSelectors').innerHTML = teamSelectorsHTML();
   document.getElementById('panelA').innerHTML = panelHTML('A');
@@ -889,8 +1033,34 @@ document.body.addEventListener('click', e => {
     }, 20);
   }
   if (action === 'loadRec') loadRecommendation(parseInt(idx, 10));
+  if (action === 'doImportSleeper'){
+    if (sleeperImporting) return;
+    const input = document.getElementById('ilSleeperUrl').value;
+    const errEl = document.getElementById('ilSleeperError');
+    errEl.style.display = 'none';
+    sleeperImporting = true;
+    t.textContent = 'Importing…';
+    importFromSleeperUrl(input).then(data => {
+      sleeperImporting = false;
+      importLeague(data);
+      render();
+    }).catch(e => {
+      sleeperImporting = false;
+      errEl.textContent = 'Could not import: ' + e.message;
+      errEl.style.display = 'block';
+      render();
+    });
+  }
+  if (action === 'confirmPendingImport'){
+    const data = pendingImport;
+    pendingImport = null;
+    importLeague(data);
+    render();
+  }
+  if (action === 'discardPendingImport'){ pendingImport = null; render(); }
 });
 
+checkHashImport();
 render();
 </script>
 </body>
