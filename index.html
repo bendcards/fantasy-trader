@@ -280,6 +280,9 @@
     margin-bottom:20px;
   }
   .rec-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:6px; }
+  .rec-focus-row{ display:flex; align-items:center; gap:8px; margin-bottom:10px; flex-wrap:wrap; }
+  .rec-focus-row label{ font-size:11px; color: var(--chalk-faint); text-transform:uppercase; letter-spacing:0.5px; }
+  .rec-focus-row select{ min-width:200px; }
   .rec-hint{ font-size:11.5px; color: var(--chalk-faint); margin-bottom:12px; line-height:1.5; }
   .rec-card{
     display:flex; align-items:center; gap:12px; background: var(--panel-raised);
@@ -319,7 +322,7 @@
 <div class="hero-caption">
   <div class="eyebrow">2026 &middot; Rest-of-season value &middot; regenerate weekly</div>
   <h1>Fantasy Trader</h1>
-  <p id="subtitle">Add each team's full roster, mark who's changing hands, and get a trade grade for each side.</p>
+  <p id="subtitle">Add the players changing hands for an instant value-for-value grade, or import a full league for starting-lineup-based grades and trade recommendations.</p>
 </div>
 
 <div class="wrap">
@@ -473,6 +476,7 @@ let sendAway = { A: new Set(), B: new Set() };
 let newLeagueForm = false;
 let importLeagueForm = false;
 let recommendations = null; // { forTeamId, results: [...] } | null
+let recFocusPlayer = null; // player name on Team A's roster to restrict recommendations to, or null for "any player"
 let pendingImport = null; // {name, teams:[...]} | null -- staged import from #import= hash, awaiting confirm
 let sleeperImporting = false;
 
@@ -595,6 +599,7 @@ function resetTradeState(){
   sendAway = { A: new Set(), B: new Set() };
   searchQuery = { A: '', B: '' };
   recommendations = null;
+  recFocusPlayer = null;
 }
 function switchLeague(id){
   activeLeagueId = id;
@@ -684,7 +689,7 @@ function combosOf(arr, n){
   return out;
 }
 
-function findRecommendations(teamId){
+function findRecommendations(teamId, focusPlayerName){
   const league = activeLeague();
   const team = teamById(league, teamId);
   const teamPlayers = hydrate(team.roster);
@@ -702,6 +707,10 @@ function findRecommendations(teamId){
     REC_SHAPES.forEach(([giveN, getN]) => {
       if (teamPlayers.length < giveN || oppPlayers.length < getN) return;
       combosOf(teamPlayers, giveN).forEach(give => {
+        // When a focus player is chosen, only consider "give" packages that include them --
+        // required, but (for the 2-for-1 shape) not necessarily the only player sent. No filter
+        // at all when focusPlayerName is null, which reproduces the original whole-roster search.
+        if (focusPlayerName && !give.some(p => p.name === focusPlayerName)) return;
         const giveNames = new Set(give.map(p => p.name));
         const xRemaining = teamPlayers.filter(p => !giveNames.has(p.name));
         combosOf(oppPlayers, getN).forEach(get => {
@@ -752,7 +761,7 @@ function leagueBarHTML(){
     ${newLeagueForm ? newLeagueFormHTML() : ''}
     ${importLeagueForm ? importLeagueFormHTML() : ''}
     ${activeLeagueId === 'scratch'
-      ? `<div class="league-hint">Quick Trade mode isn't saved. Create a league to enter every team's full roster once, keep it for the rest of the season, and unlock trade recommendations.</div>`
+      ? `<div class="league-hint">Quick Trade compares just the players you add, value for value &mdash; nothing here is saved. Create a league to enter every team's full roster once, keep it for the rest of the season, and unlock trade recommendations.</div>`
       : ''}
   `;
 }
@@ -825,8 +834,9 @@ function teamSelectorsHTML(){
 
 function panelHTML(side){
   const team = currentTeam(side);
+  const isQuickTrade = activeLeagueId === 'scratch';
   const rosterPlayers = hydrate(team.roster);
-  const lineupPAR = optimalLineupPAR(rosterPlayers);
+  const lineupPAR = isQuickTrade ? null : optimalLineupPAR(rosterPlayers);
   const matches = searchMatches(side);
   const resultsHTML = searchQuery[side].trim()
     ? (matches.length
@@ -856,12 +866,14 @@ function panelHTML(side){
           <button class="send-toggle ${sendAway[side].has(p.name) ? 'on' : ''}" data-side="${side}" data-action="toggle" data-name="${escAttr(p.name)}" title="Mark as sent in this trade">&#8644;</button>
           <button class="remove-btn" data-side="${side}" data-action="remove" data-name="${escAttr(p.name)}" title="Remove from roster">&times;</button>
         </div>`).join('')
-    : `<div class="roster-empty">No players yet &mdash; search above to build this team's full current roster.</div>`;
+    : `<div class="roster-empty">${isQuickTrade
+          ? 'No players yet &mdash; search above to add the player(s) involved in this trade.'
+          : 'No players yet &mdash; search above to build this team\'s full current roster.'}</div>`;
 
   return `
     <div class="team-head">
       <input class="team-name-input" data-side="${side}" value="${escAttr(team.name)}">
-      <span class="lineup-par">Lineup PAR <b>${lineupPAR}</b></span>
+      ${isQuickTrade ? '' : `<span class="lineup-par">Lineup PAR <b>${lineupPAR}</b></span>`}
     </div>
     <div class="search-box">
       <span class="search-icon">&#128269;</span>
@@ -881,24 +893,31 @@ function summaryHTML(){
     return { summary: `<div class="summary-empty"><div class="big">No trade proposed yet</div>Use the &#8644; toggle on a roster row to mark a player as sent, on either side.</div>`, method: methodologyHTML() };
   }
 
-  const aAfter = aRoster.filter(p => !sendAway.A.has(p.name)).concat(bSend);
-  const bAfter = bRoster.filter(p => !sendAway.B.has(p.name)).concat(aSend);
-  const aBefore = optimalLineupPAR(aRoster);
-  const bBefore = optimalLineupPAR(bRoster);
-  const aDelta = optimalLineupPAR(aAfter) - aBefore;
-  const bDelta = optimalLineupPAR(bAfter) - bBefore;
+  const isQuickTrade = activeLeagueId === 'scratch';
   const aRawValue = sumPAR(bSend) - sumPAR(aSend);
   const bRawValue = sumPAR(aSend) - sumPAR(bSend);
 
+  // Quick Trade only ever holds the players actually named in the trade (no full roster), so
+  // optimalLineupPAR()'s empty-slot penalty would swamp the grade with noise unrelated to the
+  // players involved -- Quick Trade grades on raw PAR value alone. Saved leagues hold full
+  // rosters, so they keep grading on starting-lineup impact, same as before.
+  let aDelta, bDelta;
+  if (!isQuickTrade){
+    const aAfter = aRoster.filter(p => !sendAway.A.has(p.name)).concat(bSend);
+    const bAfter = bRoster.filter(p => !sendAway.B.has(p.name)).concat(aSend);
+    aDelta = optimalLineupPAR(aAfter) - optimalLineupPAR(aRoster);
+    bDelta = optimalLineupPAR(bAfter) - optimalLineupPAR(bRoster);
+  }
+
   const card = (label, sent, received, rawValue, delta) => {
-    const g = gradeFor(delta);
+    const g = gradeFor(isQuickTrade ? rawValue : delta);
     return `
       <div class="grade-card">
         <div class="grade-badge ${g.cls}">${g.grade}</div>
         <div class="grade-body">
           <div class="grade-team">${esc(label)}</div>
           <div class="grade-line">Raw value change: <b>${rawValue >= 0 ? '+' : ''}${rawValue}</b> RoS PAR</div>
-          <div class="grade-line">Starting-lineup impact: <b>${delta >= 0 ? '+' : ''}${delta}</b> RoS PAR</div>
+          ${isQuickTrade ? '' : `<div class="grade-line">Starting-lineup impact: <b>${delta >= 0 ? '+' : ''}${delta}</b> RoS PAR</div>`}
           <div class="grade-players">
             <b>Sends:</b> ${sent.length ? sent.map(p => esc(p.name)).join(', ') : '&mdash;'}<br>
             <b>Receives:</b> ${received.length ? received.map(p => esc(p.name)).join(', ') : '&mdash;'}
@@ -915,10 +934,19 @@ function summaryHTML(){
       ${card(teamA.name, aSend, bSend, aRawValue, aDelta)}
       ${card(teamB.name, bSend, aSend, bRawValue, bDelta)}
     </div>${applyBtn}`;
-  return { summary, method: methodologyHTML() };
+  return { summary, method: methodologyHTML(isQuickTrade) };
 }
 
-function methodologyHTML(){
+function methodologyHTML(isQuickTrade){
+  if (isQuickTrade){
+    return `
+      <p><b>How the grade works:</b> Quick Trade compares the players you've added directly, value
+      for value &mdash; each side's rest-of-season PAR (points above a replacement-level player, for
+      the games left this season) received minus what it gives up. There's no full roster here, so
+      there's no starting-lineup calculation to fold in &mdash; just the players actually changing
+      hands. Create a league to build full rosters and get starting-lineup-based grades and trade
+      recommendations.</p>`;
+  }
   return `
     <p><b>How the grade works:</b> "Raw value change" is just the rest-of-season PAR (points above a
     replacement-level player, for the games left this season) each side gains minus what it gives
@@ -930,23 +958,38 @@ function methodologyHTML(){
     for 1-for-1, 2-for-1, and 1-for-2 combinations. A trade is only suggested if it's a genuine
     starting-lineup improvement for your team AND the other team's own starting-lineup impact
     doesn't drop below a C+ &mdash; so recommendations should be ones the other side would plausibly
-    say yes to, not lopsided offers. Ranked by how much they help your team, most helpful first.</p>`;
+    say yes to, not lopsided offers. Ranked by how much they help your team, most helpful first.
+    Optionally focus the search on one player to only see trades that send that player away.</p>`;
 }
 
 function recPanelHTML(){
   if (activeLeagueId === 'scratch') return '';
   const league = activeLeague();
   const teamA = currentTeam('A');
+  const teamARoster = hydrate(teamA.roster);
   const showResults = recommendations && recommendations.forTeamId === teamAId;
+  const focusOpts = teamARoster.slice().sort((a,b) => b.ros_par - a.ros_par).map(p =>
+    `<option value="${escAttr(p.name)}" ${recFocusPlayer===p.name?'selected':''}>${esc(p.name)}</option>`
+  ).join('');
+  const hint = recFocusPlayer
+    ? `Checks every other team in ${esc(league.name)} for trades that send <b>${esc(recFocusPlayer)}</b> away
+       and improve ${esc(teamA.name)}'s starting lineup while staying fair to the other side.`
+    : `Checks every other team in ${esc(league.name)} for 1-for-1 and 2-for-1 (or 1-for-2)
+       trades that improve ${esc(teamA.name)}'s starting lineup while staying fair to the other side.`;
   return `
     <div class="rec-panel">
       <div class="rec-head">
         <div class="summary-title" style="margin:0;">Trade recommendations for ${esc(teamA.name)}</div>
         <button class="reset-btn small primary" data-action="findRecs">Find trades</button>
       </div>
-      <div class="rec-hint">Checks every other team in ${esc(league.name)} for 1-for-1 and 2-for-1 (or 1-for-2)
-        trades that improve ${esc(teamA.name)}'s starting lineup while staying fair to the other side.
-        Switch which team is "Team A" above to get recommendations for a different team.</div>
+      <div class="rec-focus-row">
+        <label for="recFocusSelect">Focus on a player</label>
+        <select id="recFocusSelect">
+          <option value="">Any player</option>
+          ${focusOpts}
+        </select>
+      </div>
+      <div class="rec-hint">${hint} Switch which team is "Team A" above to get recommendations for a different team.</div>
       <div id="recResults">${showResults ? recResultsHTML() : ''}</div>
     </div>`;
 }
@@ -996,7 +1039,7 @@ function render(){
   document.getElementById('recPanel').innerHTML = recPanelHTML();
   document.getElementById('subtitle').textContent =
     activeLeagueId === 'scratch'
-      ? `Quick two-team mode. Values refreshed: ${ROS_REFRESH_LABEL}.`
+      ? `Quick, value-for-value two-team mode. Values refreshed: ${ROS_REFRESH_LABEL}.`
       : `Editing ${activeLeague().name}. Values refreshed: ${ROS_REFRESH_LABEL}.`;
 }
 
@@ -1020,6 +1063,11 @@ document.body.addEventListener('change', e => {
   if (e.target.id === 'leagueSelect'){ switchLeague(e.target.value); render(); }
   if (e.target.id === 'teamASelect'){ setTeamSlot('A', e.target.value); render(); }
   if (e.target.id === 'teamBSelect'){ setTeamSlot('B', e.target.value); render(); }
+  if (e.target.id === 'recFocusSelect'){
+    recFocusPlayer = e.target.value || null;
+    recommendations = null;
+    render();
+  }
 });
 
 document.body.addEventListener('click', e => {
@@ -1056,7 +1104,7 @@ document.body.addEventListener('click', e => {
   if (action === 'findRecs'){
     document.getElementById('recResults').innerHTML = `<div class="summary-empty">Searching every matchup&hellip;</div>`;
     setTimeout(() => {
-      recommendations = { forTeamId: teamAId, results: findRecommendations(teamAId) };
+      recommendations = { forTeamId: teamAId, results: findRecommendations(teamAId, recFocusPlayer) };
       render();
     }, 20);
   }
